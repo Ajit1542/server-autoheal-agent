@@ -38,7 +38,9 @@ if __name__ == "__main__":
         metrics["autoheal_fstab_failed"]=1
     if not stale_mount.run():
         metrics["autoheal_stale_failed"]=1
-        
+    
     log("===== Agent Finished =====\n")
+
+    write_metrics()
 
 
