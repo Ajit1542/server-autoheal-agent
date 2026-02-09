@@ -83,6 +83,8 @@ def run():
                 log(f"Remount attempted for {mount}")
             else:
                 log(f"Server unreachable → escalate ticket for {mount}")
+                return False
 
         else:
             log(f"Unknown mount type for {mount}")
+            return False

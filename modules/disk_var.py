@@ -38,5 +38,7 @@ def run():
 
     if new_usage < THRESHOLD:
         log("/var cleanup successful")
+        return True
     else:
         log("/var still high. Needs manual investigation")
+        return False

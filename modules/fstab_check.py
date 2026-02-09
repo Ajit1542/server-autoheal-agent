@@ -73,3 +73,4 @@ def run():
         found = any(mount == f[0] for f in fstab_mounts)
         if not found:
             log(f"{mount} mounted but not in fstab → customer validation needed")
+            return False
