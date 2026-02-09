@@ -15,7 +15,7 @@ def get_fstab_mounts():
         for line in f:
             if line.startswith("#") or line.strip() == "":
                 continue
-            parts = line.split()
+            parts = line.split() 
             if len(parts) > 1:
                 mounts.append((parts[1], line))
     return mounts
