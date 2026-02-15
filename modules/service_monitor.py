@@ -1,80 +1,98 @@
 import subprocess
 import datetime
+import os
+import json
 
 LOG_FILE = "logs/agent.log"
+STATE_FILE = "logs/service_state.json"
+MAX_RETRIES = 2
 
-#store the logs into log file
+
 def log(message):
     with open(LOG_FILE, "a") as f:
         f.write(f"{datetime.datetime.now()} - {message}\n")
 
-#service status function
-def get_status(service):
-    return subprocess.getoutput(f"systemctl is-active {service}")
 
-#service restart fuction
+def get_status(service):
+    return subprocess.getoutput(f"systemctl is-active {service}").strip()
+
+
 def restart(service):
     subprocess.run(["systemctl", "restart", service])
 
 
-# ---------- SSSD CHECK ----------
-def check_sssd():
-    status = get_status("sssd")
+def get_rca(service):
+    return subprocess.getoutput(f"journalctl -u {service} -n 20 --no-pager")
+
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {}
+    with open(STATE_FILE, "r") as f:
+        return json.load(f)
+
+
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
+
+
+def reset_retry(state, service):
+    state[service] = {"retries": 0}
+    save_state(state)
+
+
+def increment_retry(state, service):
+    if service not in state:
+        state[service] = {"retries": 0}
+    state[service]["retries"] += 1
+    save_state(state)
+    return state[service]["retries"]
+
+
+def create_alert(service, rca):
+    alert_file = f"logs/{service}_ALERT.flag"
+    with open(alert_file, "w") as f:
+        f.write(f"{datetime.datetime.now()}\n")
+        f.write("Service failed after retries\n\n")
+        f.write(rca)
+    log(f"ALERT CREATED for {service}")
+
+
+def check_service(service):
+    state = load_state()
+    status = get_status(service)
 
     if status == "active":
-        log("sssd service is active and running fine")
+        log(f"{service} active and running fine")
+        reset_retry(state, service)
         return
 
-    log("sssd service is DOWN. Restarting...")
-    restart("sssd")
+    retries = state.get(service, {}).get("retries", 0)
 
-    if get_status("sssd") == "active":
-        log("sssd restarted successfully")
-        return True
-    else:
-        log("sssd restart FAILED. Needs escalation")
-        return False
-
-
-# ---------- NTP CHECK ----------
-def check_time_sync():
-    # ntp_status = get_status("ntpd")
-    chrony_status = get_status("chronyd")
-
-    # if ntp_status == "active":
-    #     log("ntpd service is active and running fine")
-    #     return 
-
-    if chrony_status == "active":
-        log("chronyd service is active and running fine")
+    if retries >= MAX_RETRIES:
+        log(f"{service} already retried {MAX_RETRIES} times. Skipping auto-fix.")
         return
 
-    log("chronyd service is DOWN. Attempting recovery...")
+    log(f"{service} DOWN. Attempting restart {retries+1}/{MAX_RETRIES}")
+    restart(service)
 
-    # Try chronyd first
-    restart("chronyd")
+    # Recheck status
+    new_status = get_status(service)
 
-    if get_status("chronyd") == "active":
-        log("chronyd service restarted successfully")
-        return True
+    if new_status == "active":
+        log(f"{service} restarted successfully")
+        reset_retry(state, service)
     else:
-        log("Time sync recovery FAILED. Needs escalation")
-        return False
-    # # Try ntpd
-    # restart("ntpd")
+        retries = increment_retry(state, service)
+        log(f"{service} restart failed. Retry count: {retries}")
 
-    # if get_status("ntpd") == "active":
-    #     log("ntpd restarted successfully")
-    #     return True
-    
-
-
+        if retries >= MAX_RETRIES:
+            log(f"{service} failed after {MAX_RETRIES} retries → ESCALATE")
+            rca = get_rca(service)
+            log(f"RCA for {service}:\n{rca}")
+            create_alert(service, rca)
 def run():
-
-    sssd_service=check_sssd()
-    time_sync_Service=check_time_sync()
-    if (sssd_service and time_sync_Service) == True:
-        return True
-    else:
-        return False
-    
+    check_service("sssd")
+    check_service("ntpd")
+    check_service("chronyd")
